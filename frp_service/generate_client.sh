@@ -1,16 +1,68 @@
 #!/bin/bash
 
-# 检查参数
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <remote_ip> <remote_port>"
-    echo "Example: $0 1.2.3.4 7000"
+# 定义错误处理函数
+error_exit() {
+    echo "错误: $1" >&2
     exit 1
+}
+
+# 设置默认值
+LOCAL_SSH_PORT=22
+REMOTE_SSH_PORT=6000
+
+# 显示帮助信息
+show_help() {
+    echo "Usage: $0 -s server_ip -p server_port [-l local_port] [-r remote_port]"
+    echo "Options:"
+    echo "  -s: FRP服务器IP地址（必需）"
+    echo "  -p: FRP服务器端口（必需）"
+    echo "  -l: 本地SSH端口（默认22）"
+    echo "  -r: 远程映射端口（默认6000）"
+    echo "  -h: 显示帮助信息"
+    exit 0
+}
+
+# 参数解析
+while getopts "s:p:l:r:h" opt; do
+    case $opt in
+        s) REMOTE_IP="$OPTARG";;
+        p) REMOTE_PORT="$OPTARG";;
+        l) LOCAL_SSH_PORT="$OPTARG";;
+        r) REMOTE_SSH_PORT="$OPTARG";;
+        h) show_help;;
+        \?) error_exit "无效的选项: -$OPTARG";;
+        :) error_exit "选项 -$OPTARG 需要参数";;
+    esac
+done
+
+# 检查必需参数
+if [ -z "$REMOTE_IP" ] || [ -z "$REMOTE_PORT" ]; then
+    error_exit "服务器IP和端口是必需的参数\n使用 -h 查看帮助信息"
 fi
 
-REMOTE_IP=$1
-REMOTE_PORT=$2
-LOCAL_SSH_PORT=22
-REMOTE_SSH_PORT=7000  # 远程SSH转发端口
+# 验证端口号
+validate_port() {
+    local port=$1
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        error_exit "无效的端口号: $port"
+    fi
+}
+
+validate_port "$REMOTE_PORT"
+validate_port "$LOCAL_SSH_PORT"
+validate_port "$REMOTE_SSH_PORT"
+
+# 验证IP地址
+if ! [[ "$REMOTE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    error_exit "无效的IP地址: $REMOTE_IP"
+fi
+
+echo "配置信息："
+echo "服务器IP: $REMOTE_IP"
+echo "服务器端口: $REMOTE_PORT"
+echo "本地SSH端口: $LOCAL_SSH_PORT"
+echo "远程映射端口: $REMOTE_SSH_PORT"
+echo
 
 # 创建必要的目录
 mkdir -p frp
@@ -30,15 +82,15 @@ rm -rf $FRP_FILENAME frp.tar.gz
 
 # 创建frpc配置文件
 cat > frp/frpc.toml << EOF
-[common]
-server_addr = ${REMOTE_IP}
-server_port = ${REMOTE_PORT}
+serverAddr = "${REMOTE_IP}"
+serverPort = ${REMOTE_PORT}
 
-[ssh]
-type = tcp
-local_ip = 127.0.0.1
-local_port = ${LOCAL_SSH_PORT}
-remote_port = ${REMOTE_SSH_PORT}
+[[proxies]]
+name = "ssh-tunnel"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = ${LOCAL_SSH_PORT}
+remotePort = ${REMOTE_SSH_PORT}
 EOF
 
 # 生成服务文件
@@ -119,7 +171,7 @@ echo "Generated files and configurations:"
 echo "1. ${SERVICE_FILE} - Service unit file"
 echo "2. ${INSTALL_SCRIPT} - Installation script"
 echo "3. ${UNINSTALL_SCRIPT} - Uninstallation script"
-echo "4. frp/frpc.ini - FRP client configuration"
+echo "4. frp/frpc.toml - FRP client configuration"
 echo
 echo "To install the service, run: sudo ./${INSTALL_SCRIPT}"
 echo "After installation, your SSH service will be accessible at ${REMOTE_IP}:${REMOTE_SSH_PORT}"
