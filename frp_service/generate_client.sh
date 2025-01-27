@@ -10,7 +10,40 @@ NC='\033[0m' # No Color
 # Define error handling function
 error_exit() {
     echo -e "${RED}Error: $1${NC}" >&2
+    show_help
     exit 1
+}
+
+# Detect system architecture
+detect_arch() {
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64)
+            echo "amd64"
+            ;;
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        armv7*|armv6*|arm*)
+            echo "arm"
+            ;;
+        *)
+            error_exit "Unsupported architecture: $arch\nOnly amd64, arm64, and arm are supported"
+            ;;
+    esac
+}
+
+# Detect operating system
+detect_os() {
+    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    case "$os" in
+        linux)
+            echo "linux"
+            ;;
+        *)
+            error_exit "Unsupported operating system: $os\nOnly Linux is supported"
+            ;;
+    esac
 }
 
 # Set default values
@@ -44,7 +77,7 @@ done
 
 # Check required parameters
 if [ -z "$REMOTE_IP" ] || [ -z "$REMOTE_PORT" ]; then
-    error_exit "Server IP and port are required\nUse -h to show help message"
+    error_exit "Server IP and port are required"
 fi
 
 # Validate port number
@@ -77,8 +110,8 @@ mkdir -p frp
 # Download latest version of frp
 echo -e "${BLUE}Downloading latest FRP...${NC}"
 LATEST_VERSION=$(curl -s https://api.github.com/repos/fatedier/frp/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")')
-ARCH="amd64"
-OS="linux"
+ARCH=$(detect_arch)
+OS=$(detect_os)
 FRP_FILENAME="frp_${LATEST_VERSION#v}_${OS}_${ARCH}"
 DOWNLOAD_URL="https://github.com/fatedier/frp/releases/download/${LATEST_VERSION}/${FRP_FILENAME}.tar.gz"
 

@@ -10,15 +10,48 @@ NC='\033[0m' # No Color
 # Define error handling function
 error_exit() {
     echo -e "${RED}Error: $1${NC}" >&2
+    show_help
     exit 1
+}
+
+# Detect system architecture
+detect_arch() {
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64)
+            echo "amd64"
+            ;;
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        armv7*|armv6*|arm*)
+            echo "arm"
+            ;;
+        *)
+            error_exit "Unsupported architecture: $arch\nOnly amd64, arm64, and arm are supported"
+            ;;
+    esac
+}
+
+# Detect operating system
+detect_os() {
+    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    case "$os" in
+        linux)
+            echo "linux"
+            ;;
+        *)
+            error_exit "Unsupported operating system: $os\nOnly Linux is supported"
+            ;;
+    esac
 }
 
 # Show help information
 show_help() {
-    echo -e "${BLUE}Usage: $0 -p bind_port -d dashboard_port${NC}"
+    echo -e "${BLUE}Usage: $0 -p bind_port [-d dashboard_port]${NC}"
     echo -e "${YELLOW}Options:${NC}"
     echo "  -p: FRP server bind port (required)"
-    echo "  -d: Dashboard port (required)"
+    echo "  -d: Dashboard port (optional)"
     echo "  -h: Show this help message"
     exit 0
 }
@@ -35,8 +68,8 @@ while getopts "p:d:h" opt; do
 done
 
 # Check required parameters
-if [ -z "$BIND_PORT" ] || [ -z "$DASHBOARD_PORT" ]; then
-    error_exit "Bind port and dashboard port are required\nUse -h to show help message"
+if [ -z "$BIND_PORT" ]; then
+    error_exit "Bind port is required"
 fi
 
 # Validate port number
@@ -48,11 +81,15 @@ validate_port() {
 }
 
 validate_port "$BIND_PORT"
-validate_port "$DASHBOARD_PORT"
+if [ ! -z "$DASHBOARD_PORT" ]; then
+    validate_port "$DASHBOARD_PORT"
+fi
 
 echo -e "${BLUE}Configuration Info:${NC}"
 echo -e "${GREEN}Bind Port: ${NC}$BIND_PORT"
-echo -e "${GREEN}Dashboard Port: ${NC}$DASHBOARD_PORT"
+if [ ! -z "$DASHBOARD_PORT" ]; then
+    echo -e "${GREEN}Dashboard Port: ${NC}$DASHBOARD_PORT"
+fi
 echo
 
 # Create necessary directory
@@ -61,8 +98,8 @@ mkdir -p frp
 # Download latest version of frp
 echo -e "${BLUE}Downloading latest FRP...${NC}"
 LATEST_VERSION=$(curl -s https://api.github.com/repos/fatedier/frp/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")')
-ARCH="amd64"
-OS="linux"
+ARCH=$(detect_arch)
+OS=$(detect_os)
 FRP_FILENAME="frp_${LATEST_VERSION#v}_${OS}_${ARCH}"
 DOWNLOAD_URL="https://github.com/fatedier/frp/releases/download/${LATEST_VERSION}/${FRP_FILENAME}.tar.gz"
 
@@ -72,7 +109,14 @@ mv $FRP_FILENAME/* frp/
 rm -rf $FRP_FILENAME frp.tar.gz
 
 # Create frps configuration file
-cat > frp/frps.toml << EOF
+if [ -z "$DASHBOARD_PORT" ]; then
+    # Basic configuration without dashboard
+    cat > frp/frps.toml << EOF
+bindPort = ${BIND_PORT}
+EOF
+else
+    # Configuration with dashboard
+    cat > frp/frps.toml << EOF
 bindPort = ${BIND_PORT}
 [webServer]
 addr = "0.0.0.0"
@@ -80,6 +124,7 @@ port = ${DASHBOARD_PORT}
 user = "admin"
 password = "admin"
 EOF
+fi
 
 # Generate service file
 SERVICE_NAME="frps"
@@ -128,8 +173,10 @@ systemctl start $SERVICE_NAME
 
 echo -e "${GREEN}$SERVICE_NAME service has been installed and started.${NC}"
 echo -e "${GREEN}FRP Server is listening on port ${BIND_PORT}${NC}"
-echo -e "${GREEN}Dashboard is accessible at http://0.0.0.0:${DASHBOARD_PORT}${NC}"
-echo -e "${YELLOW}Dashboard credentials: admin/admin${NC}"
+if [ ! -z "$DASHBOARD_PORT" ]; then
+    echo -e "${GREEN}Dashboard is accessible at http://0.0.0.0:${DASHBOARD_PORT}${NC}"
+    echo -e "${YELLOW}Dashboard credentials: admin/admin${NC}"
+fi
 EOF
 
 # Generate uninstallation script
@@ -167,5 +214,7 @@ echo
 echo -e "${YELLOW}To install the service, run: ${NC}sudo ./${INSTALL_SCRIPT}"
 echo -e "${YELLOW}After installation:${NC}"
 echo -e "- FRP Server will be listening on port ${BIND_PORT}"
-echo -e "- Dashboard will be accessible at http://0.0.0.0:${DASHBOARD_PORT}"
-echo -e "- Dashboard credentials: admin/admin"
+if [ ! -z "$DASHBOARD_PORT" ]; then
+    echo -e "- Dashboard will be accessible at http://0.0.0.0:${DASHBOARD_PORT}"
+    echo -e "- Dashboard credentials: admin/admin"
+fi
